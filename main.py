@@ -1,21 +1,28 @@
 import os
 import json
+import re
 import requests
 from bs4 import BeautifulSoup
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Quantidade de páginas que o robô vai vasculhar (Página 1, 2 e 3)
 PAGINAS_PARA_VERIFICAR = 3
+FILE_HISTORICO = "vagas_vistas.json"
 
-PALAVRAS_CHAVE = [
-    "noturno", "noturna", "12x36", "escala", "fim de semana", 
-    "fins de semana", "sábado", "domingo", "feriado", "plantao", 
-    "plantão", "madrugada", "17h", "18h", "noite"
+# Terrmos diretos de turnos noturnos/flexíveis/fins de semana
+TERMOS_NOTURNOS = [
+    "noturno", "noturna", "12x36", "madrugada", "fechamento", 
+    "fim de semana", "fins de semana", "sábado", "sabado", 
+    "domingo", "escala", "plantao", "plantão", "part-time", "meio periodo"
 ]
 
-FILE_HISTORICO = "vagas_vistas.json"
+# Cargos que frequentemente possuem escala noturna/fim de semana (para anúncios genéricos)
+CARGOS_SUSPEITOS = [
+    "atendente", "recepcionista", "garcom", "garçom", "garçonete", 
+    "cozinha", "auxiliar de cozinha", "pizzaiolo", "entregador", 
+    "vigilante", "porteiro", "operador", "caixa", "atendimento", "farmacia", "farmácia"
+]
 
 def carregar_historico():
     if os.path.exists(FILE_HISTORICO):
@@ -37,18 +44,36 @@ def enviar_telegram(mensagem):
     }
     requests.post(url, data=payload)
 
+def eh_vaga_compativel(titulo, texto_completo):
+    texto_lower = texto_completo.lower()
+    titulo_lower = titulo.lower()
+
+    # 1. Checa presença de termos noturnos explícitos
+    if any(termo in texto_lower or termo in titulo_lower for termo in TERMOS_NOTURNOS):
+        return True
+
+    # 2. Avalia horários numéricos via Regex (ex: 18h, 18:00, 19h30, 22:00)
+    # Procura horários de início noturno a partir de 17:30 / 18:00
+    padrao_horario_noturno = r'(1[8-9]|2[0-3])\s*(h|:|hrs|horas)'
+    if re.search(padrao_horario_noturno, texto_lower):
+        return True
+
+    # 3. Se for anúncio genérico ("44h", "a combinar"), analisa se o cargo costuma ter turno noturno
+    if any(cargo in titulo_lower for cargo in CARGOS_SUSPEITOS):
+        # Se não for expressamente uma vaga comercial de escritório (ex: 08:00 às 18:00), envia para checagem
+        if not re.search(r'(0[7-9]|10)\s*(h|:).*as.*\s*(1[7-8])\s*(h|:)', texto_lower):
+            return True
+
+    return False
+
 def monitorar_vagas():
     historico = carregar_historico()
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    # Percorre da página 1 até a quantidade definida
     for pagina in range(1, PAGINAS_PARA_VERIFICAR + 1):
-        if pagina == 1:
-            url = "https://themosvagas.com.br/regiao/teresina/"
-        else:
-            url = f"https://themosvagas.com.br/regiao/teresina/page/{pagina}/"
-
+        url = "https://themosvagas.com.br/regiao/teresina/" if pagina == 1 else f"https://themosvagas.com.br/regiao/teresina/page/{pagina}/"
         resposta = requests.get(url, headers=headers)
+        
         if resposta.status_code != 200:
             continue
 
@@ -69,13 +94,11 @@ def monitorar_vagas():
             resp_vaga = requests.get(link, headers=headers)
             if resp_vaga.status_code == 200:
                 soup_vaga = BeautifulSoup(resp_vaga.text, "html.parser")
-                conteudo_texto = soup_vaga.get_text().lower()
+                conteudo_texto = soup_vaga.get_text()
 
-                encontrou = any(palavra in conteudo_texto or palavra in titulo.lower() for palavra in PALAVRAS_CHAVE)
-
-                if encontrou:
+                if eh_vaga_compativel(titulo, conteudo_texto):
                     mensagem = (
-                        f"🚨 <b>NOVA VAGA ENCONTRADA!</b>\n\n"
+                        f"🚨 <b>OPORTUNIDADE ENCONTRADA!</b>\n\n"
                         f"📌 <b>Título:</b> {titulo}\n"
                         f"🔗 <b>Link:</b> {link}"
                     )
