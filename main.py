@@ -10,14 +10,12 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PAGINAS_PARA_VERIFICAR = 3
 FILE_HISTORICO = "vagas_vistas.json"
 
-# Terrmos diretos de turnos noturnos/flexíveis/fins de semana
 TERMOS_NOTURNOS = [
     "noturno", "noturna", "12x36", "madrugada", "fechamento", 
     "fim de semana", "fins de semana", "sábado", "sabado", 
     "domingo", "escala", "plantao", "plantão", "part-time", "meio periodo"
 ]
 
-# Cargos que frequentemente possuem escala noturna/fim de semana (para anúncios genéricos)
 CARGOS_SUSPEITOS = [
     "atendente", "recepcionista", "garcom", "garçom", "garçonete", 
     "cozinha", "auxiliar de cozinha", "pizzaiolo", "entregador", 
@@ -40,27 +38,48 @@ def enviar_telegram(mensagem):
         "chat_id": TELEGRAM_CHAT_ID,
         "text": mensagem,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False
+        "disable_web_page_preview": True
     }
     requests.post(url, data=payload)
+
+def extrair_email(texto):
+    padrao_email = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    emails = re.findall(padrao_email, texto)
+    return emails[0] if emails else None
+
+def extrair_trecho_horario(texto):
+    linhas = [linha.strip() for linha in texto.split('\n') if linha.strip()]
+    trechos_encontrados = []
+    
+    palavras_chave_horario = [
+        "horário", "horario", "escala", "turno", "segunda", "terça", "quarta", 
+        "quinta", "sexta", "sábado", "sabado", "domingo", "12x36", "carga horária", "carga horaria"
+    ]
+    
+    for linha in linhas:
+        linha_lower = linha.lower()
+        if any(pc in linha_lower for pc in palavras_chave_horario) or re.search(r'\d{1,2}\s*(h|:|hrs)', linha_lower):
+            trechos_encontrados.append(linha)
+            if len(trechos_encontrados) >= 2:
+                break
+    
+    if trechos_encontrados:
+        resumo = " | ".join(trechos_encontrados)
+        return resumo[:250] + "..." if len(resumo) > 250 else resumo
+    return "Consulte os detalhes no link da vaga."
 
 def eh_vaga_compativel(titulo, texto_completo):
     texto_lower = texto_completo.lower()
     titulo_lower = titulo.lower()
 
-    # 1. Checa presença de termos noturnos explícitos
     if any(termo in texto_lower or termo in titulo_lower for termo in TERMOS_NOTURNOS):
         return True
 
-    # 2. Avalia horários numéricos via Regex (ex: 18h, 18:00, 19h30, 22:00)
-    # Procura horários de início noturno a partir de 17:30 / 18:00
     padrao_horario_noturno = r'(1[8-9]|2[0-3])\s*(h|:|hrs|horas)'
     if re.search(padrao_horario_noturno, texto_lower):
         return True
 
-    # 3. Se for anúncio genérico ("44h", "a combinar"), analisa se o cargo costuma ter turno noturno
     if any(cargo in titulo_lower for cargo in CARGOS_SUSPEITOS):
-        # Se não for expressamente uma vaga comercial de escritório (ex: 08:00 às 18:00), envia para checagem
         if not re.search(r'(0[7-9]|10)\s*(h|:).*as.*\s*(1[7-8])\s*(h|:)', texto_lower):
             return True
 
@@ -97,11 +116,18 @@ def monitorar_vagas():
                 conteudo_texto = soup_vaga.get_text()
 
                 if eh_vaga_compativel(titulo, conteudo_texto):
+                    email = extrair_email(conteudo_texto)
+                    trecho_horario = extrair_trecho_horario(conteudo_texto)
+
                     mensagem = (
                         f"🚨 <b>OPORTUNIDADE ENCONTRADA!</b>\n\n"
                         f"📌 <b>Título:</b> {titulo}\n"
-                        f"🔗 <b>Link:</b> {link}"
+                        f"⏰ <b>Horário/Detalhes:</b> {trecho_horario}\n"
                     )
+                    if email:
+                        mensagem += f"✉️ <b>E-mail do RH:</b> <a href='mailto:{email}?subject=Candidatura%20-%20{titulo}'>{email}</a> (clique para enviar)\n"
+                    mensagem += f"\n🔗 <b>Link da vaga:</b> {link}"
+
                     enviar_telegram(mensagem)
 
             historico.append(link)
