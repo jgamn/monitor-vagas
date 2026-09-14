@@ -89,6 +89,9 @@ def monitorar_vagas():
     historico = carregar_historico()
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
+    print("=== INÍCIO DO MONITORAMENTO ===")
+    print(f"Vagas no histórico: {len(historico)}")
+
     for pagina in range(1, PAGINAS_PARA_VERIFICAR + 1):
         url = "https://themosvagas.com.br/regiao/teresina/" if pagina == 1 else f"https://themosvagas.com.br/regiao/teresina/page/{pagina}/"
         resposta = requests.get(url, headers=headers)
