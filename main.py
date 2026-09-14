@@ -135,4 +135,7 @@ def monitorar_vagas():
     salvar_historico(historico)
 
 if __name__ == "__main__":
+    # DISPARO FORÇADO PARA TESTE DE CONEXÃO:
+    enviar_telegram("🧪 <b>TESTE DE CONEXÃO:</b> Se você recebeu esta mensagem, o robô está 100% conectado e funcionando!")
+    
     monitorar_vagas()
