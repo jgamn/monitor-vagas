@@ -1,149 +1,73 @@
-import os
-import json
-import re
-import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+URL = "https://themosvagas.com.br/regiao/teresina/"
 
-PAGINAS_PARA_VERIFICAR = 3
-FILE_HISTORICO = "vagas_vistas.json"
 
-TERMOS_NOTURNOS = [
-    "noturno", "noturna", "12x36", "madrugada", "fechamento", 
-    "fim de semana", "fins de semana", "sábado", "sabado", 
-    "domingo", "escala", "plantao", "plantão", "part-time", "meio periodo"
-]
+def testar_acesso():
+    print("=== TESTE DE ACESSO COM PLAYWRIGHT ===")
+    print(f"URL: {URL}")
 
-CARGOS_SUSPEITOS = [
-    "atendente", "recepcionista", "garcom", "garçom", "garçonete", 
-    "cozinha", "auxiliar de cozinha", "pizzaiolo", "entregador", 
-    "vigilante", "porteiro", "operador", "caixa", "atendimento", "farmacia", "farmácia"
-]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True
+        )
 
-def carregar_historico():
-    if os.path.exists(FILE_HISTORICO):
-        with open(FILE_HISTORICO, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/151.0.0.0 Safari/537.36"
+            ),
+            viewport={
+                "width": 1366,
+                "height": 768
+            }
+        )
 
-def salvar_historico(historico):
-    with open(FILE_HISTORICO, "w", encoding="utf-8") as f:
-        json.dump(historico, f, ensure_ascii=False, indent=2)
+        try:
+            resposta = page.goto(
+                URL,
+                wait_until="domcontentloaded",
+                timeout=30000
+            )
 
-def enviar_telegram(mensagem):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensagem,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    requests.post(url, data=payload)
+            if resposta:
+                print(f"Status HTTP: {resposta.status}")
+            else:
+                print("Status HTTP: não informado")
 
-def extrair_email(texto):
-    padrao_email = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-    emails = re.findall(padrao_email, texto)
-    return emails[0] if emails else None
+            print(f"URL final: {page.url}")
+            print(f"Título da página: {page.title()}")
 
-def extrair_trecho_horario(texto):
-    linhas = [linha.strip() for linha in texto.split('\n') if linha.strip()]
-    trechos_encontrados = []
-    
-    palavras_chave_horario = [
-        "horário", "horario", "escala", "turno", "segunda", "terça", "quarta", 
-        "quinta", "sexta", "sábado", "sabado", "domingo", "12x36", "carga horária", "carga horaria"
-    ]
-    
-    for linha in linhas:
-        linha_lower = linha.lower()
-        if any(pc in linha_lower for pc in palavras_chave_horario) or re.search(r'\d{1,2}\s*(h|:|hrs)', linha_lower):
-            trechos_encontrados.append(linha)
-            if len(trechos_encontrados) >= 2:
-                break
-    
-    if trechos_encontrados:
-        resumo = " | ".join(trechos_encontrados)
-        return resumo[:250] + "..." if len(resumo) > 250 else resumo
-    return "Consulte os detalhes no link da vaga."
+            quantidade_artigos = page.locator("article").count()
+            print(f"Quantidade de <article>: {quantidade_artigos}")
 
-def eh_vaga_compativel(titulo, texto_completo):
-    texto_lower = texto_completo.lower()
-    titulo_lower = titulo.lower()
+            print("\n=== PRIMEIRAS VAGAS ENCONTRADAS ===")
 
-    if any(termo in texto_lower or termo in titulo_lower for termo in TERMOS_NOTURNOS):
-        return True
+            limite = min(5, quantidade_artigos)
 
-    padrao_horario_noturno = r'(1[8-9]|2[0-3])\s*(h|:|hrs|horas)'
-    if re.search(padrao_horario_noturno, texto_lower):
-        return True
+            for i in range(limite):
+                artigo = page.locator("article").nth(i)
 
-    if any(cargo in titulo_lower for cargo in CARGOS_SUSPEITOS):
-        if not re.search(r'(0[7-9]|10)\s*(h|:).*as.*\s*(1[7-8])\s*(h|:)', texto_lower):
-            return True
+                try:
+                    texto = artigo.inner_text().strip()
+                    texto = " ".join(texto.split())
 
-    return False
+                    print(f"\nVaga {i + 1}:")
+                    print(texto[:500])
 
-def monitorar_vagas():
-    historico = carregar_historico()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    }
+                except Exception as erro:
+                    print(f"Erro ao ler a vaga {i + 1}: {erro}")
 
-    print("=== INÍCIO DO MONITORAMENTO ===")
-    print(f"Vagas no histórico: {len(historico)}")
+            print("\n=== FIM DO TESTE ===")
 
-    for pagina in range(1, PAGINAS_PARA_VERIFICAR + 1):
-        url = "https://themosvagas.com.br/regiao/teresina/" if pagina == 1 else f"https://themosvagas.com.br/regiao/teresina/page/{pagina}/"
-        resposta = requests.get(url, headers=headers)
-        print(f"Página {pagina}: status HTTP {resposta.status_code}")
-        
-        if resposta.status_code != 200:
-            continue
+        except Exception as erro:
+            print("\nERRO DURANTE O ACESSO:")
+            print(erro)
 
-        soup = BeautifulSoup(resposta.text, "html.parser")
-        artigos = soup.find_all("article")
+        finally:
+            browser.close()
 
-        for artigo in artigos:
-            link_tag = artigo.find("a")
-            if not link_tag or not link_tag.get("href"):
-                continue
-
-            link = link_tag["href"]
-            titulo = link_tag.get_text(strip=True)
-
-            if link in historico:
-                continue
-
-            resp_vaga = requests.get(link, headers=headers)
-            if resp_vaga.status_code == 200:
-                soup_vaga = BeautifulSoup(resp_vaga.text, "html.parser")
-                conteudo_texto = soup_vaga.get_text()
-
-                if eh_vaga_compativel(titulo, conteudo_texto):
-                    email = extrair_email(conteudo_texto)
-                    trecho_horario = extrair_trecho_horario(conteudo_texto)
-
-                    mensagem = (
-                        f"🚨 <b>OPORTUNIDADE ENCONTRADA!</b>\n\n"
-                        f"📌 <b>Título:</b> {titulo}\n"
-                        f"⏰ <b>Horário/Detalhes:</b> {trecho_horario}\n"
-                    )
-                    if email:
-                        mensagem += f"✉️ <b>E-mail do RH:</b> <a href='mailto:{email}?subject=Candidatura%20-%20{titulo}'>{email}</a> (clique para enviar)\n"
-                    mensagem += f"\n🔗 <b>Link da vaga:</b> {link}"
-
-                    enviar_telegram(mensagem)
-
-            historico.append(link)
-
-    salvar_historico(historico)
 
 if __name__ == "__main__":
-    monitorar_vagas()
+    testar_acesso()
