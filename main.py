@@ -79,7 +79,7 @@ def extrair_trecho_relevante(texto):
         
     return "Requisito identificado no título ou corpo da vaga."
 
-# --- MÓDULOS DE RASPAGEM (UM PARA CADA SITE) ---
+# --- MÓDULOS DE RASPAGEM DE SITES ---
 
 def raspar_themos_vagas(headers):
     """Módulo responsável por ler o portal Themos Vagas"""
@@ -95,11 +95,6 @@ def raspar_themos_vagas(headers):
 
     soup = BeautifulSoup(resposta.text, "html.parser")
     artigos = soup.find_all("article")
-
-    if not artigos:
-        logging.warning("[Themos Vagas] Nenhum elemento <article> encontrado.")
-        enviar_telegram("⚠️ <b>Aviso de Diagnóstico:</b> Nenhuma vaga foi localizada na página do Themos Vagas.")
-        return vagas_encontradas
 
     for artigo in artigos:
         link_tag = artigo.find("a")
@@ -117,15 +112,48 @@ def raspar_themos_vagas(headers):
 
     return vagas_encontradas
 
+def raspar_piaui_empregos(headers):
+    """Módulo responsável por ler o portal Piauí Empregos"""
+    url_base = "https://piauiempregos.com.br/"
+    vagas_encontradas = []
+
+    try:
+        resposta = requests.get(url_base, headers=headers, timeout=20)
+        resposta.raise_for_status()
+    except requests.RequestException as e:
+        logging.error(f"[Piauí Empregos] Falha ao acessar o site: {e}")
+        return vagas_encontradas
+
+    soup = BeautifulSoup(resposta.text, "html.parser")
+    artigos = soup.find_all("article") or soup.find_all("div", class_=re.compile(r'post|vaga|job', re.IGNORECASE))
+
+    for artigo in artigos:
+        link_tag = artigo.find("a")
+        if not link_tag or not link_tag.get("href"):
+            continue
+
+        link = urljoin(url_base, link_tag["href"].strip())
+        titulo = link_tag.get_text(strip=True)
+
+        if titulo and len(titulo) > 5 and link not in [v["link"] for v in vagas_encontradas]:
+            vagas_encontradas.append({
+                "site": "Piauí Empregos",
+                "titulo": titulo,
+                "link": link
+            })
+
+    return vagas_encontradas
+
 # --- MOTOR PRINCIPAL DO SISTEMA ---
 
 def processar_e_notificar_vagas():
     historico = carregar_historico()
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    # Lista de raspadores ativos no sistema
+    # Consolidação das fontes de vagas
     vagas_para_processar = []
     vagas_para_processar.extend(raspar_themos_vagas(headers))
+    vagas_para_processar.extend(raspar_piaui_empregos(headers))
 
     novas_notificadas = 0
 
