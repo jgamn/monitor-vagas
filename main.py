@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+import html
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
@@ -13,6 +14,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 FILE_HISTORICO = "vagas_vistas.json"
 MAX_HISTORICO = 500
+MAX_VAGAS_POR_SITE = 15
 
 PALAVRAS_CHAVE = [
     "noturno", "noturna", "12x36", "escala", "fim de semana", 
@@ -82,7 +84,6 @@ def extrair_trecho_relevante(texto):
 # --- MÓDULOS DE RASPAGEM DE SITES ---
 
 def raspar_themos_vagas(headers):
-    """Módulo responsável por ler o portal Themos Vagas"""
     url_base = "https://themosvagas.com.br/regiao/teresina/"
     vagas_encontradas = []
 
@@ -110,10 +111,9 @@ def raspar_themos_vagas(headers):
             "link": link
         })
 
-    return vagas_encontradas
+    return vagas_encontradas[:MAX_VAGAS_POR_SITE]
 
 def raspar_piaui_empregos(headers):
-    """Módulo responsável por ler o portal Piauí Empregos"""
     url_base = "https://piauiempregos.com.br/"
     vagas_encontradas = []
 
@@ -142,7 +142,7 @@ def raspar_piaui_empregos(headers):
                 "link": link
             })
 
-    return vagas_encontradas
+    return vagas_encontradas[:MAX_VAGAS_POR_SITE]
 
 # --- MOTOR PRINCIPAL DO SISTEMA ---
 
@@ -150,7 +150,6 @@ def processar_e_notificar_vagas():
     historico = carregar_historico()
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    # Consolidação das fontes de vagas
     vagas_para_processar = []
     vagas_para_processar.extend(raspar_themos_vagas(headers))
     vagas_para_processar.extend(raspar_piaui_empregos(headers))
@@ -165,7 +164,7 @@ def processar_e_notificar_vagas():
         if link in historico:
             continue
 
-        time.sleep(1) # Pausa de polidez
+        time.sleep(1)
 
         try:
             resp_vaga = requests.get(link, headers=headers, timeout=15)
@@ -179,11 +178,16 @@ def processar_e_notificar_vagas():
 
                 if tem_palavra or tem_horario:
                     trecho = extrair_trecho_relevante(conteudo_texto)
+                    
+                    titulo_esc = html.escape(titulo)
+                    trecho_esc = html.escape(trecho)
+                    site_esc = html.escape(site_nome)
+
                     mensagem = (
                         f"🚨 <b>NOVA VAGA ENCONTRADA!</b>\n\n"
-                        f"🌐 <b>Fonte:</b> {site_nome}\n"
-                        f"📌 <b>Título:</b> {titulo}\n"
-                        f"💬 <b>Trecho:</b> <i>\"{trecho}\"</i>\n"
+                        f"🌐 <b>Fonte:</b> {site_esc}\n"
+                        f"📌 <b>Título:</b> {titulo_esc}\n"
+                        f"💬 <b>Trecho:</b> <i>\"{trecho_esc}\"</i>\n"
                         f"🔗 <b>Link:</b> {link}"
                     )
                     enviar_telegram(mensagem)
