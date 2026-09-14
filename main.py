@@ -95,6 +95,7 @@ def monitorar_vagas():
     for pagina in range(1, PAGINAS_PARA_VERIFICAR + 1):
         url = "https://themosvagas.com.br/regiao/teresina/" if pagina == 1 else f"https://themosvagas.com.br/regiao/teresina/page/{pagina}/"
         resposta = requests.get(url, headers=headers)
+        print(f"Página {pagina}: status HTTP {resposta.status_code}")
         
         if resposta.status_code != 200:
             continue
